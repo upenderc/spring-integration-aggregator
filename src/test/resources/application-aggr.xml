@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:stream="http://www.springframework.org/schema/integration/stream"
+	xmlns:int-kafka="http://www.springframework.org/schema/integration/kafka"
+	xmlns:int-http="http://www.springframework.org/schema/integration/http"
+	xmlns:task="http://www.springframework.org/schema/task"
+	xsi:schemaLocation="http://www.springframework.org/schema/integration/stream http://www.springframework.org/schema/integration/stream/spring-integration-stream.xsd
+	 	http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd 
+        http://www.springframework.org/schema/integration/kafka http://www.springframework.org/schema/integration/kafka/spring-integration-kafka.xsd
+        http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task.xsd
+        http://www.springframework.org/schema/integration/http http://www.springframework.org/schema/integration/http/spring-integration-http.xsd">
+       <int:poller id="defaultPoller" fixed-delay="500" max-messages-per-poll="50" default="true"/>
+       
+       <int:channel id="inputChannel">
+        	<int:dispatcher task-executor="producerThreadExecutor"/>
+       </int:channel>
+       
+       <int:channel id="discardChannel">
+       			<int:dispatcher task-executor="discardChannelExecutor"/>
+       			<int:interceptors>
+        			<int:wire-tap channel="logger"/>
+				</int:interceptors>
+       </int:channel>
+       <int:logging-channel-adapter id="logger" level="DEBUG" logger-name="discard" />
+      
+       <task:executor id="producerThreadExecutor" pool-size="50" queue-capacity="10"  rejection-policy="DISCARD" />
+       <task:executor id="genericChannelExecutor" pool-size="50" queue-capacity="10"  rejection-policy="DISCARD" />
+       <task:executor id="discardChannelExecutor" pool-size="50" queue-capacity="10"  rejection-policy="DISCARD" />
+       <int:channel id="out">
+       		<int:queue/>
+       </int:channel> 
+       
+       <bean id="timeoutReleaseStrategy" class="org.springframework.integration.aggregator.TimeoutCountSequenceSizeReleaseStrategy">
+		<constructor-arg name="threshold" value="10" />
+		<constructor-arg name="timeout" value="500" />
+	   </bean>
+       
+      <int:aggregator input-channel="inputChannel" output-channel="out" discard-channel="discardChannel"
+              message-store="store" release-strategy="timeoutReleaseStrategy" correlation-strategy="corelationStrategyBean"
+              send-partial-result-on-expiry="true"
+              send-timeout="500" />
+      <int:service-activator ref="consumer" method="onMessage" input-channel="out" />
+      <bean id="store" class="org.springframework.integration.store.SimpleMessageStore" />
+     
+      <bean id="myReaper" class="org.springframework.integration.store.MessageGroupStoreReaper">
+		<property name="messageGroupStore" ref="store" />
+		<property name="timeout" value="500" />
+	  </bean>
+	  <task:scheduler id="taskScheduler"/>
+	  <task:scheduled-tasks scheduler="taskScheduler">
+	  			<task:scheduled ref="myReaper" method="run" fixed-rate="1000"/>
+	  </task:scheduled-tasks>
+	  <bean id="corelationStrategyBean" class="com.uppi.poc.sa.CorelationStrategyBean" /> 
+      <bean id="consumer" class="com.uppi.poc.sa.Consumer" />
+     
+</beans>
